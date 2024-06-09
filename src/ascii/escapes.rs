@@ -1,28 +1,25 @@
-use std::borrow::Cow;
-
-pub trait ParsableSequence<'a, T> {
-    fn parse_sequence<I>(seq: &'a Cow<'a,str>, chars: &mut std::iter::Peekable<I>) -> Vec<T> where I: Iterator<Item = char>;
+pub trait ParsableSequence<T> {
+    fn parse_sequence<I>(chars: &mut std::iter::Peekable<I>) -> Vec<T> where I: Iterator<Item = char>;
 }
 
 #[derive(Debug)]
-pub enum Sequence<'a> {
-    Text(&'a Cow<'a,str>),
-    Test(char),
+pub enum Sequence {
+    Text(char),
     Escape(Vec<Escape>),
 }
 
-impl<'a> ParsableSequence<'a, Sequence<'a>> for Sequence<'a>{
-    fn parse_sequence<I>(seq: &'a Cow<'a,str>, chars: &mut std::iter::Peekable<I>) -> Vec<Sequence<'a>> where I: Iterator<Item = char> {
+impl ParsableSequence<Sequence> for Sequence{
+    fn parse_sequence<I>(chars: &mut std::iter::Peekable<I>) -> Vec<Sequence> where I: Iterator<Item = char> {
         let mut parsed_seq = Vec::new();
 
         while let Some(&c) = chars.peek() {
             if c as char == '\x1b' {
-                let escapes = Escape::parse_sequence(seq, chars);
+                let escapes = Escape::parse_sequence(chars);
                 if escapes.len()>0 {
                     parsed_seq.push(Sequence::Escape(escapes));
                 }
             } else {
-                parsed_seq.push(Sequence::Test(c));
+                parsed_seq.push(Sequence::Text(c));
             }
             chars.next();
         }
@@ -106,7 +103,6 @@ pub enum Escape {
     ResetInverse,      // 27m
     ResetHidden,       // 28m
     ResetStrikethrough,// 29m
-    SetColor(Color),
     SaveCursorPos,
     RestoreCursorPos,
     RequestCursorPos,
@@ -134,8 +130,8 @@ pub enum Escape {
     DisableAltBuffer,          //?1049l
 }
 
-impl<'a> ParsableSequence<'a, Escape> for Escape{
-    fn parse_sequence<I>(seq: &'a Cow<'a,str>, chars: &mut std::iter::Peekable<I>) -> Vec<Escape> where I: Iterator<Item = char> {
+impl ParsableSequence<Escape> for Escape{
+    fn parse_sequence<I>(chars: &mut std::iter::Peekable<I>) -> Vec<Escape> where I: Iterator<Item = char> {
         let mut start_long_esc = false;
         let mut escapes = Vec::new();
         while let Some(&c) = chars.peek() {
@@ -155,7 +151,7 @@ impl<'a> ParsableSequence<'a, Escape> for Escape{
         }
 
         if start_long_esc {
-            escapes = parse_long_seq(escapes, seq, chars);
+            escapes = parse_long_seq(escapes, chars);
         }
 
         escapes
@@ -168,7 +164,7 @@ enum SpecialLongCase {
     PrivateMode
 }
 
-fn parse_long_seq<'a, I>(mut escapes: Vec<Escape>, seq: &'a Cow<'a,str>, chars: &mut std::iter::Peekable<I>) -> Vec<Escape> where I: Iterator<Item = char> {
+fn parse_long_seq<I>(mut escapes: Vec<Escape>, chars: &mut std::iter::Peekable<I>) -> Vec<Escape> where I: Iterator<Item = char> {
     let mut number = String::new();
     let mut special_esc_flag = SpecialLongCase::NoSpecial;
     let mut i = 0;
@@ -439,14 +435,3 @@ fn parse_long_seq<'a, I>(mut escapes: Vec<Escape>, seq: &'a Cow<'a,str>, chars: 
 
     escapes
 }
-
-#[derive(Debug)]
-pub enum TextStyle {
-    Bold
-}
-
-#[derive(Debug)]
-pub enum Color {
-    Red
-}
-

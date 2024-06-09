@@ -1,11 +1,12 @@
-use std::{io::{self, Read}, borrow::Cow};
+use std::borrow::Cow;
+
 use super::escapes::*;
 
 
-pub fn parse_sequences<'a>(input: &'a Cow<'a, str>) -> Vec<Sequence<'a>> {
+pub fn parse_sequences(input: Cow<str>) -> Vec<Sequence> {
     let mut chars = input.chars().peekable();
 
-    let sequences = Sequence::parse_sequence(input, &mut chars);
+    let sequences = Sequence::parse_sequence(&mut chars);
 
     sequences
 }
