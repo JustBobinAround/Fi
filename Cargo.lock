@@ -3,9 +3,5 @@
 version = 3
 
 [[package]]
-name = "ascii_parser"
-version = "0.1.0"
-
-[[package]]
 name = "fi"
 version = "0.1.0"

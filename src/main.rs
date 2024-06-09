@@ -1,3 +1,20 @@
+extern crate fi;
+use std::io::Read;
+
+use fi::ascii::parser::*;
+use fi::ascii::escapes::*;
 fn main() {
-    println!("Hello, world!");
+    let mut buffer = Vec::new();
+    std::io::stdin().read_to_end(&mut buffer).expect("Failed to read input");
+
+    let input = String::from_utf8_lossy(&buffer);
+    let sequences = parse_sequences(&input);
+
+    for sequence in sequences {
+        match sequence {
+            Sequence::Test(text) => println!("Text: {:?}", text),
+            Sequence::Escape(esc) => println!("Escape: {:?}", esc),
+            _ => {}
+        }
+    }
 }
