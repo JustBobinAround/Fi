@@ -1,6 +1,5 @@
-workspace = { members = ["ascii_parser"] }
 [package]
-name = "fi"
+name = "ascii_parser"
 version = "0.1.0"
 edition = "2021"
 
