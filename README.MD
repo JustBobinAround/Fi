@@ -14,7 +14,7 @@
 
 ### Problems to Solve
 
-- [ ] Fix blocking I/O on thread join issue
+- [x] Fix blocking I/O on thread join issue
 
 
 ### Dev Log
