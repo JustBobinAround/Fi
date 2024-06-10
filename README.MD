@@ -12,6 +12,9 @@
 - [ ] Text editor and plugin system
 - [ ] Python configuration api
 
+### Problems to Solve
+
+- [ ] Fix blocking I/O on thread join issue
 
 
 ### Dev Log
