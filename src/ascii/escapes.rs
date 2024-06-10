@@ -1,3 +1,12 @@
+const ESC_CHAR: char= '\x1b';
+macro_rules! esc {
+    ($name:literal) => {
+        {format!("{}{}",ESC_CHAR, $name)}
+    };
+    ($name:expr) => {
+        {format!("{}{}", ESC_CHAR, $name)}
+    };
+}
 pub trait ParsableSequence<T> {
     fn parse_sequence<I>(chars: &mut std::iter::Peekable<I>) -> Vec<T> where I: Iterator<Item = char>;
 }
@@ -13,7 +22,7 @@ impl ParsableSequence<Sequence> for Sequence{
         let mut parsed_seq = Vec::new();
 
         while let Some(&c) = chars.peek() {
-            if c as char == '\x1b' {
+            if c as char == ESC_CHAR {
                 let escapes = Escape::parse_sequence(chars);
                 if escapes.len()>0 {
                     parsed_seq.push(Sequence::Escape(escapes));
@@ -126,8 +135,112 @@ pub enum Escape {
     SetCursorInvisible,        //?25l
     RestoreScreen,             //?47h
     SaveScreen,                //?47l
-    EnableAltBuffer,           //?1049h
-    DisableAltBuffer,          //?1049l
+    EnterAltScreen,           //?1049h
+    ExitAltScreen,          //?1049l
+}
+
+impl Escape {
+    pub fn to_string(&self) -> String{
+        match self {
+            Escape::ResetAllModes                => {esc!("0m")},   // 0m
+            Escape::ZeroCursor                   => {esc!("H")},      // H
+            Escape::MoveCursorTo((line,col))     => { esc!(format!("{};{}H", line, col)) },    // line;colH || line;colf
+            Escape::CursorUp(i)                  => {esc!(format!("{}A",i))},         // #A
+            Escape::CursorMoveOneLineUp          => {esc!("M")},   // M
+            Escape::CursorDown(i)                => {esc!(format!("{}B",i))},         // #B
+            Escape::CursorRight(i)               => {esc!(format!("{}C",i))},         // #C
+            Escape::CursorLeft(i)                => {esc!(format!("{}D",i))},         // #D
+            Escape::CursorToNextLineStart(i)     => {esc!(format!("{}E",i))},         // #E
+            Escape::CursorToPastLineStart(i)     => {esc!(format!("{}F",i))},         // #F
+            Escape::ClearInDisplay               => {esc!("J")},               // J
+            Escape::ClearDisplayUntilScreenEnd   => {esc!("0J")},   // 0J
+            Escape::ClearDisplayUntilScreenStart => {esc!("1J")}, // 1J
+            Escape::ClearAll                     => {esc!("2J")},                     // 2J
+            Escape::EraseSavedLine               => {esc!("3J")},               // 3J
+            Escape::EraseInLine                  => {esc!("K")},                  // K
+            Escape::EraseFromCursorToEnd         => {esc!("0K")},         // 0K
+            Escape::EraseFromCursorToStart       => {esc!("1K")},       // 1K
+            Escape::EraseLine                    => {esc!("2K")},                    // 2K
+            Escape::CursorToCol(i)               => {esc!(format!("{}G", i))},   // #G
+            Escape::SetBold                      => {esc!("1m")},         // 1m
+            Escape::SetDim                       => {esc!("2m")},          // 2m
+            Escape::SetItalic                    => {esc!("3m")},       // 3m
+            Escape::SetUnderline                 => {esc!("4m")},    // 4m
+            Escape::SetBlinking                  => {esc!("5m")},     // 5m
+            Escape::SetInverse                   => {esc!("7m")},      // 7m
+            Escape::SetHidden                    => {esc!("8m")},       // 8m
+            Escape::SetStrikethrough             => {esc!("9m")},// 9m
+            Escape::SetForgroundBlack            => {esc!("30m")},     // 30m
+            Escape::SetBackgroundBlack           => {esc!("40m")},    // 40m
+            Escape::SetForgroundRed              => {esc!("31m")},       // 31m
+            Escape::SetBackgroundRed             => {esc!("41m")},      // 41m
+            Escape::SetForgroundGreen            => {esc!("32m")},     // 32m
+            Escape::SetBackgroundGreen           => {esc!("42m")},    // 42m
+            Escape::SetForgroundYellow           => {esc!("33m")},    // 33m
+            Escape::SetBackgroundYellow          => {esc!("43m")},   // 43m
+            Escape::SetForgroundBlue             => {esc!("34m")},      // 34m
+            Escape::SetBackgroundBlue            => {esc!("44m")},     // 44m
+            Escape::SetForgroundMagenta          => {esc!("35m")},   // 35m
+            Escape::SetBackgroundMagenta         => {esc!("45m")},  // 45m
+            Escape::SetForgroundCyan             => {esc!("36m")},      // 36m
+            Escape::SetBackgroundCyan            => {esc!("46m")},     // 46m
+            Escape::SetForgroundWhite            => {esc!("37m")},     // 37m
+            Escape::SetBackgroundWhite           => {esc!("47m")},    // 47m
+            Escape::SetForgroundDefault          => {esc!("39m")},   // 39m
+            Escape::SetBackgroundDefault         => {esc!("49m")},  // 49m
+            Escape::SetForgroundBriBlack         => {esc!("90m")},  // 90m
+            Escape::SetBackgroundBriBlack        => {esc!("100m")},  // 100m
+            Escape::SetForgroundBriRed           => {esc!("91m")},     // 91m
+            Escape::SetBackgroundBriRed          => {esc!("101m")},    // 101m
+            Escape::SetForgroundBriGreen         => {esc!("92m")},   // 92m
+            Escape::SetBackgroundBriGreen        => {esc!("102m")},  // 102m
+            Escape::SetForgroundBriYellow        => {esc!("93m")},  // 93m
+            Escape::SetBackgroundBriYellow       => {esc!("103m")}, // 103m
+            Escape::SetForgroundBriBlue          => {esc!("94m")},    // 94m
+            Escape::SetBackgroundBriBlue         => {esc!("104m")},   // 104m
+            Escape::SetForgroundBriMagenta       => {esc!("95m")}, // 95m
+            Escape::SetBackgroundBriMagenta      => {esc!("105m")},// 105m
+            Escape::SetForgroundBriCyan          => {esc!("96m")},    // 96m
+            Escape::SetBackgroundBriCyan         => {esc!("106m")},   // 106m
+            Escape::SetForgroundBriWhite         => {esc!("97m")},   // 97m
+            Escape::SetBackgroundBriWhite        => {esc!("107m")},  // 107m
+            Escape::SetForgroundCustomColor(i)   => {esc!(format!("38;5;{}m",i))}, // 38;5;{id}m
+            Escape::SetBackgroundCustomColor(i)  => {esc!(format!("48;5;{}m",i))},// 48;5;{id}m
+            Escape::ResetBold                    => {esc!("22m")},         // 22m
+            Escape::ResetDim                     => {esc!("22m")},          // 22m
+            Escape::ResetItalic                  => {esc!("23m")},       // 23m
+            Escape::ResetUnderline               => {esc!("24m")},    // 24m
+            Escape::ResetBlinking                => {esc!("25m")},     // 25m
+            Escape::ResetInverse                 => {esc!("27m")},      // 27m
+            Escape::ResetHidden                  => {esc!("28m")},       // 28m
+            Escape::ResetStrikethrough           => {esc!("29m")},// 29m
+            Escape::SaveCursorPos                => {esc!("7")},
+            Escape::RestoreCursorPos             => {esc!("8")},
+            Escape::RequestCursorPos             => {esc!("6n")},
+            Escape::Set40_25MonoScreen           => {esc!("=0h")},        //=0h
+            Escape::Set40_25ColorScreen          => {esc!("=1h")},       //=1h
+            Escape::Set80_25MonoScreen           => {esc!("=2h")},        //=2h
+            Escape::Set80_25ColorScreen          => {esc!("=3h")},       //=3h
+            Escape::Set320_2004ColorScreen       => {esc!("=4h")},    //=4h
+            Escape::Set320_200MonoScreen         => {esc!("=5h")},      //=5h
+            Escape::Set640_200MonoScreen         => {esc!("=6h")},      //=6h
+            Escape::EnableLineWrap               => {esc!("=7h")},            //=7h
+            Escape::Set320_200ColorScreen        => {esc!("=13h")},     //=13h
+            Escape::Set640_200ColorScreen        => {esc!("=14h")},     //=14h
+            Escape::Set640_350MonoScreen         => {esc!("=15h")},      //=15h
+            Escape::Set640_350ColorScreen        => {esc!("=16h")},     //=16h
+            Escape::Set640_480MonoScreen         => {esc!("=17h")},      //=17h
+            Escape::Set640_480ColorScreen        => {esc!("=18h")},     //=18h
+            Escape::Set320_200ColorScreen256     => {esc!("=19h")},  //=19h
+            Escape::ResetScreenSet(i)            => {esc!(format!("={}l",i))},        //={val}l
+            Escape::SetCursorVisible             => {esc!("?25h")},          //?25h
+            Escape::SetCursorInvisible           => {esc!("?25l")},        //?25l
+            Escape::RestoreScreen                => {esc!("?47h")},             //?47h
+            Escape::SaveScreen                   => {esc!("?47l")},                //?47l
+            Escape::EnterAltScreen               => {esc!("?1049h")},           //?1049h
+            Escape::ExitAltScreen                => {esc!("?1049l")},          //?1049l
+        }
+    }
 }
 
 impl ParsableSequence<Escape> for Escape{
@@ -188,7 +301,7 @@ fn parse_long_seq<I>(mut escapes: Vec<Escape>, chars: &mut std::iter::Peekable<I
                             match number.as_str() {
                                 "25" => {escapes.push(Escape::SetCursorInvisible)},
                                 "47" => {escapes.push(Escape::RestoreScreen)},
-                                "1049" => {escapes.push(Escape::DisableAltBuffer)},
+                                "1049" => {escapes.push(Escape::ExitAltScreen)},
                                 _ => {}
                             }
                         },
@@ -221,7 +334,7 @@ fn parse_long_seq<I>(mut escapes: Vec<Escape>, chars: &mut std::iter::Peekable<I
                             match number.as_str() {
                                 "25" => {escapes.push(Escape::SetCursorVisible)},
                                 "47" => {escapes.push(Escape::SaveScreen)},
-                                "1049" => {escapes.push(Escape::EnableAltBuffer)},
+                                "1049" => {escapes.push(Escape::EnterAltScreen)},
                                 _ => {}
                             }
                         },
