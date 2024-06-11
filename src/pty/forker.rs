@@ -1,8 +1,105 @@
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::io::{self, Write, Read};
 use super::raw_mode::raw_mode;
-use crate::ascii::escapes::{Escape, EscapeWriter};
+use crate::ascii::escapes::{Escape, EscapeWriter, Sequence};
+
+struct TerminalQueue<'a, T: Write> {
+    to_write: HashMap<u32,Vec<Sequence>>,
+    writer: &'a mut T,
+}
+
+impl<'a, T:Write> TerminalQueue<'a,T> {
+    fn new(writer: &'a mut T) -> TerminalQueue<'a, T> {
+        TerminalQueue { to_write: HashMap::new() , writer}
+    }
+
+    fn push_sequence(&mut self, term: &PTerminal<T>, seq: Sequence) {
+        if let Some(seq_list) = self.to_write.get_mut(&term.term_id) {
+            seq_list.push(seq);
+        } else {
+            self.to_write.insert(term.term_id, vec![seq]);
+        }
+    }
+
+    fn push_sequences(&mut self, term: &PTerminal<T>, mut seqs: Vec<Sequence>) {
+        if let Some(seq_list) = self.to_write.get_mut(&term.term_id) {
+            seq_list.append(&mut seqs);   
+        } else {
+            self.to_write.insert(term.term_id, seqs);
+        }
+    }
+
+    fn request_flush(&mut self, term: &PTerminal<T>) -> io::Result<()>{
+        if let Some(seq_list) = self.to_write.get_mut(&term.term_id) {
+            while let Some(seq) = seq_list.pop() {
+                match seq {
+                    Sequence::Text(text) => {
+                        self.writer.write(&[text as u8])?;
+                    },
+                    Sequence::Escape(escs) => {
+                        for esc in escs {
+                            self.writer.write(esc.to_string().as_bytes())?;
+                        } 
+                    }
+                } 
+            }
+        }
+
+        Ok(())
+    }
+}
+
+struct PTerminal<'a, T: Write>{
+    term_id: u32,
+    size_x: u32,
+    size_y: u32,
+    offset_x: u32,
+    offset_y: u32,
+
+    terminal_queue: Arc<Mutex<TerminalQueue<'a, T>>>
+}
+
+impl<'a, T: Write> PTerminal<'a, T> {
+    fn new(
+        terminal_queue: Arc<Mutex<TerminalQueue<'a, T>>>, 
+        size_x: u32,
+        size_y: u32,
+        offset_x: u32,
+        offset_y: u32,
+        pty_system: PtyPair,
+    ) -> PTerminal<'a, T> {
+        let mut id = 0;
+
+        if let Ok(terminal_queue) = terminal_queue.lock() {
+            id = terminal_queue.to_write.len() as u32;
+        };
+
+        PTerminal { 
+            term_id: id,
+            terminal_queue,
+            size_x,
+            size_y,
+            offset_x,
+            offset_y,
+        }
+    }
+
+    fn queue(&self, seq: Sequence) {
+        if let Ok(mut terminal_queue) = self.terminal_queue.lock() {
+            terminal_queue.push_sequence(&self, seq);
+        }
+    }
+
+    fn flush(&self) -> io::Result<()>{
+        if let Ok(mut terminal_queue) = self.terminal_queue.lock() {
+            terminal_queue.request_flush(&self)?;
+        }
+
+        Ok(())
+    }
+}
 
 pub fn old_main() -> io::Result<()> {
     let mut stdout = io::stdout();
