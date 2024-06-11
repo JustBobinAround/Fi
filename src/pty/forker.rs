@@ -1,6 +1,7 @@
 use libc::termios as Termios;
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtyPair, PtySize};
 use std::collections::HashMap;
+use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::io::{self, Error, Read, Stdin, Stdout, Write};
 use std::thread::{self, JoinHandle};
@@ -18,6 +19,7 @@ pub struct PTerminal{
     size_y: u16,
     offset_x: u32,
     offset_y: u32,
+    child: Arc<Mutex<Box<dyn portable_pty::Child + Send + Sync>>>,
     pty_pair: PtyPair,
     pty_writer: Arc<Mutex<Box<dyn Write + Send>>>,
     pty_reader: Arc<Mutex<Box<dyn Read + Send>>>,
@@ -52,6 +54,10 @@ impl PTerminal {
             Err(_) => {return Err(Error::new(io::ErrorKind::Other, "failed to spawn process"))}
         };
 
+        let child = Arc::new(Mutex::new(child));
+        let child_2= child.clone();
+
+
         let reader = Arc::new(Mutex::new(pair.master.try_clone_reader().expect("OOF")));
         let reader_2 = reader.clone();
         let writer = Arc::new(Mutex::new(pair.master.take_writer().expect("OOF")));
@@ -70,6 +76,7 @@ impl PTerminal {
             size_y,
             offset_x,
             offset_y,
+            child,
             pty_pair: pair,
             pty_writer: writer,
             pty_reader: reader,
@@ -117,6 +124,12 @@ impl PTerminal {
                         escaped = true;
                     }
                     match key_buffer[0] as char {
+                        'r' => {
+                            if let Ok(mut p_term) = p_term_3.lock() {
+                                unimplemented!("need to figure out how to get process pwd");
+                                //p_term.respawn(&("/home/WORK/Downloads/".to_string()));
+                            }
+                        }
                         'q' => {
                             if let Ok(mut p_term) = p_term_3.lock() {
                                 p_term.join_handler = true;
@@ -131,24 +144,43 @@ impl PTerminal {
                     }        
                     let _ = stdin.read(&mut *key_buffer);
                 } else {
-                    while child.try_wait().is_ok_and(|r| r.is_none())  {
-                        if key_buffer[0] == 29 {
-                            escaped = true;
-                            break;
-                        } else {
-                            if let Ok(mut writer) = writer_2.lock() {
-                                let _ = writer.write(&*key_buffer);
-                                //write!(writer, "{}", buffer[0]).expect("oOF");
-                            };
+                        while child_2.lock().is_ok_and(|mut c| c.try_wait().is_ok_and(|r| r.is_none())) {
+                            if key_buffer[0] == 29 {
+                                escaped = true;
+                                break;
+                            } else {
+                                if let Ok(mut writer) = writer_2.lock() {
+                                    let _ = writer.write(&*key_buffer);
+                                    //write!(writer, "{}", buffer[0]).expect("oOF");
+                                };
+                            }
+                            let _ = stdin.read(&mut *key_buffer);
                         }
-                        let _ = stdin.read(&mut *key_buffer);
-                    }
                 }
             }
         });
 
 
         Ok(p_term)
+    }
+
+    pub fn respawn(&mut self, working_dir: &String) -> io::Result<()>{
+        let mut cmd = CommandBuilder::new("sh");
+        cmd.arg("-c");
+        cmd.arg(format!("cd {}; bash", working_dir));
+
+        if let Ok(mut child) = self.child.lock() {
+            child.kill()?;
+            *child = match self.pty_pair.slave.spawn_command(cmd) {
+                Ok(child) => {child},
+                Err(_) => {
+                    println!("failed");
+                    return Err(Error::new(io::ErrorKind::Other, "failed to spawn process"))}
+            };
+        }
+
+
+        Ok(())
     }
 
     fn queue(&mut self, seq: Sequence) -> io::Result<()>{
@@ -178,7 +210,6 @@ impl PTerminal {
 
         Ok(())
     }
-
 
     pub fn close(&mut self) {
         self.join_handler = true;
