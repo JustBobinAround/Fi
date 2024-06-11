@@ -101,3 +101,5 @@ key because that allows me to quickly escape using both my thumbs on a kinesis
 keyboard. I think for the global escape, I will remap ctrl+enter to send `ctrl+]`
 and then also send ctrl+enter because I use that for slack a lot at my job.
 
+### Ideas for the future:
+- wasm/leptos terminal emulator ssr component using stuff from this project
