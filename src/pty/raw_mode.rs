@@ -2,10 +2,6 @@ use libc::{
     cfmakeraw, tcgetattr, tcsetattr, termios as Termios, TCSANOW,
 };
 
-lazy_static::lazy_static! {
-    static ref PRIOR_TERM_MODE: Arc<Mutex<Option<Termios>>> = Arc::new(Mutex::new(None));
-}
-
 use std::{
     fmt::Debug, fs, io::{self, Error}, mem, os::unix::{
         io::{IntoRawFd, RawFd},
@@ -25,42 +21,39 @@ fn get_term_attr(fd: RawFd) -> io::Result<Termios>{
     }
 }
 
-fn no_raw() -> io::Result<()> {
-    if let Ok(mut original_mode) = PRIOR_TERM_MODE.lock() {
-        if let Some(new_prior_mode) = original_mode.as_ref() {
-            let tty = tty_fd()?;
-            unsafe { tcsetattr(tty.raw_fd(), TCSANOW, new_prior_mode) };
-            *original_mode = None;
-        }
-    }
-    Ok(())
-}
-
-fn set_raw() -> io::Result<()> {
-    if let Ok(mut prior_mode) = PRIOR_TERM_MODE.lock() {
-        if prior_mode.is_some(){
-            return Ok(())
-        }
+fn no_raw(mut prior_mode: Option<Termios>) -> io::Result<Option<Termios>> {
+    if let Some(new_prior_mode) = prior_mode.as_ref() {
         let tty = tty_fd()?;
-        let fd = tty.raw_fd();
-        let mut ios = get_term_attr(fd)?;
-        let new_prior_mode = ios;
-        unsafe { 
-            cfmakeraw(&mut ios); 
-            tcsetattr(fd, TCSANOW, &ios);
-        };
-
-        *prior_mode = Some(new_prior_mode);
+        unsafe { tcsetattr(tty.raw_fd(), TCSANOW, new_prior_mode) };
+        prior_mode = None;
     }
-
-    Ok(())
+    Ok(prior_mode)
 }
 
-pub fn raw_mode(is_raw: bool) -> io::Result<()> {
-    if is_raw {
-        set_raw()
+fn set_raw(mut prior_mode: Option<Termios>) -> io::Result<Option<Termios>> {
+    if prior_mode.is_some(){
+        return Ok(prior_mode)
+    }
+    let tty = tty_fd()?;
+    let fd = tty.raw_fd();
+    let mut ios = get_term_attr(fd)?;
+    let new_prior_mode = ios;
+
+    unsafe { 
+        cfmakeraw(&mut ios); 
+        tcsetattr(fd, TCSANOW, &ios);
+    };
+
+    prior_mode = Some(new_prior_mode);
+
+    Ok(prior_mode)
+}
+
+pub fn raw_mode(prior_mode: Option<Termios>) -> io::Result<Option<Termios>> {
+    if prior_mode.is_none(){
+        set_raw(prior_mode)
     } else {
-        no_raw()
+        no_raw(prior_mode)
     }
 }
 
