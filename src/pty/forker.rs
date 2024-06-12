@@ -5,11 +5,13 @@ use portable_pty::{native_pty_system, CommandBuilder, PtyPair, PtySize};
 use std::sync::{Arc, Mutex};
 use std::io::{self, Error, Read, Stdout, Write};
 use super::raw_mode::raw_mode;
-use crate::ascii::escapes::{Escape, Sequence};
+use crate::ascii::escapes::{Escape, Sequence, ParsableSequence};
+use crate::logger::log_message;
 
 pub struct PTerminal{
     writer: Stdout,
     to_write: Vec<u8>,
+    buffer_hist: Vec<Sequence>,
     raw_mode: Option<Termios>,
     pub join_handler: bool,
     key_buffer: Arc<Mutex<[u8; 1]>>,
@@ -61,12 +63,14 @@ impl PTerminal {
         let writer = Arc::new(Mutex::new(pair.master.take_writer().expect("OOF")));
         let writer_2 = writer.clone();
         let to_write = Vec::new();
+        let buffer_hist = Vec::new();
         let key_buffer = Arc::new(Mutex::new([0;1]));
         let key_buffer_2 = key_buffer.clone();
 
         let p_term = Arc::new(Mutex::new(PTerminal { 
             writer: io::stdout(),
             to_write,
+            buffer_hist,
             raw_mode,
             key_buffer,
             join_handler: false,
@@ -91,22 +95,29 @@ impl PTerminal {
         }
 
         let _pty_handler = std::thread::spawn(move || {
-            let mut s: [u8; 1] = [0;1];
 
             while let Ok(mut reader) = reader_2.lock() {
                 if p_term_2.lock().is_ok_and(|j|j.join_handler) {
                     break;
                 }
-                match reader.read_exact(&mut s) {
-                    Ok(n) => {
-                        if let Ok(mut p_term) = p_term_2.lock() {
-                            p_term.to_write.push(s[0]);
-                            p_term.flush();
+                if let Ok(mut p_term) = p_term_2.lock() {
+                    let seqs = Sequence::parse_writer(&mut reader);
+                    for seq in seqs {
+                        match seq {
+                            Sequence::Text(t) => {
+                                p_term.to_write.push(t as u8);
+                            },
+                            Sequence::Escape(escs) => {
+                                for esc in escs {
+                                    p_term.to_write.append(&mut esc.to_string().into_bytes());
+                                }
+                            }
                         }
-                    },
-                    Err(_) => {}
+                    }
+                    p_term.flush();
                 }
             };
+            log_message("pty_handler exited");
             return;
         });
 
@@ -137,24 +148,25 @@ impl PTerminal {
                         },
                         '\n' => {},
                         'i' => {
+                            log_message("test");
                             escaped = false;
                         },
                         _ => {}
                     }        
                     let _ = stdin.read(&mut *key_buffer);
                 } else {
-                        while child_2.lock().is_ok_and(|mut c| c.try_wait().is_ok_and(|r| r.is_none())) {
-                            if key_buffer[0] == 29 {
-                                escaped = true;
-                                break;
-                            } else {
-                                if let Ok(mut writer) = writer_2.lock() {
-                                    let _ = writer.write(&*key_buffer);
-                                    //write!(writer, "{}", buffer[0]).expect("oOF");
-                                };
-                            }
-                            let _ = stdin.read(&mut *key_buffer);
+                    while child_2.lock().is_ok_and(|mut c| c.try_wait().is_ok_and(|r| r.is_none())) {
+                        if key_buffer[0] == 29 {
+                            escaped = true;
+                            break;
+                        } else {
+                            if let Ok(mut writer) = writer_2.lock() {
+                                let _ = writer.write(&*key_buffer);
+                                //write!(writer, "{}", buffer[0]).expect("oOF");
+                            };
                         }
+                        let _ = stdin.read(&mut *key_buffer);
+                    }
                 }
             }
         });
@@ -162,6 +174,7 @@ impl PTerminal {
 
         Ok(p_term)
     }
+
 
     pub fn get_process_pwd(&self) -> io::Result<String> {
         if let Ok(child) = self.child.lock() {
