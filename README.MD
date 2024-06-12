@@ -15,7 +15,7 @@
 ### Problems to Solve
 
 - [x] Fix blocking I/O on thread join issue
-- [ ] Figure out how to get/set child process pwd
+- [x] Figure out how to get child process pwd
 
 
 ### Dev Log
