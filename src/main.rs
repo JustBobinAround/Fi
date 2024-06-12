@@ -23,15 +23,11 @@ fn main() -> io::Result<()>{
         }
     }
 
-    let p_term = PTerminal::new(80, 40, 0, 0)?;
+    let (handle,p_term) = PTerminal::new(80, 40, 0, 0)?;
 
-    while p_term.lock().is_ok_and(|j|!j.join_handler) {
-        thread::sleep(Duration::from_millis(10));
-    }
 
-    if let Ok(mut p_term) = p_term.lock() {
-        p_term.close();
-    }
+    handle.join();
+
 
     Ok(())
 }

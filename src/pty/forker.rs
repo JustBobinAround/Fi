@@ -1,5 +1,7 @@
 use libc::termios as Termios;
 use std::ffi::CString;
+use std::thread::{self, JoinHandle};
+use std::time::Duration;
 use libc::{pid_t, TIOCGSID, ioctl, readlink};
 use portable_pty::{native_pty_system, CommandBuilder, PtyPair, PtySize};
 use std::sync::{Arc, Mutex};
@@ -14,15 +16,15 @@ pub struct PTerminal{
     buffer_hist: Vec<Sequence>,
     raw_mode: Option<Termios>,
     pub join_handler: bool,
-    key_buffer: Arc<Mutex<[u8; 1]>>,
+    key_buffer: [u8; 1],
     size_x: u16,
     size_y: u16,
     offset_x: u32,
     offset_y: u32,
-    child: Arc<Mutex<Box<dyn portable_pty::Child + Send + Sync>>>,
+    child: Box<dyn portable_pty::Child + Send + Sync>,
     pty_pair: PtyPair,
-    pty_writer: Arc<Mutex<Box<dyn Write + Send>>>,
-    pty_reader: Arc<Mutex<Box<dyn Read + Send>>>,
+    pty_writer: Box<dyn Write + Send>,
+    pty_reader: Box<dyn Read + Send>,
 }
 
 impl PTerminal {
@@ -31,7 +33,7 @@ impl PTerminal {
         size_y: u16,
         offset_x: u32,
         offset_y: u32,
-    ) -> io::Result<Arc<Mutex<PTerminal>>> {
+    ) -> io::Result<(JoinHandle<()>,Arc<Mutex<PTerminal>>)> {
         let mut cmd = CommandBuilder::new("bash");
         cmd.arg("-l");
         let raw_mode = raw_mode(None)?;
@@ -54,18 +56,12 @@ impl PTerminal {
             Err(_) => {return Err(Error::new(io::ErrorKind::Other, "failed to spawn process"))}
         };
 
-        let child = Arc::new(Mutex::new(child));
-        let child_2= child.clone();
 
-
-        let reader = Arc::new(Mutex::new(pair.master.try_clone_reader().expect("OOF")));
-        let reader_2 = reader.clone();
-        let writer = Arc::new(Mutex::new(pair.master.take_writer().expect("OOF")));
-        let writer_2 = writer.clone();
+        let reader = pair.master.try_clone_reader().expect("OOF");
+        let writer = pair.master.take_writer().expect("OOF");
         let to_write = Vec::new();
         let buffer_hist = Vec::new();
-        let key_buffer = Arc::new(Mutex::new([0;1]));
-        let key_buffer_2 = key_buffer.clone();
+        let key_buffer = [0;1];
 
         let p_term = Arc::new(Mutex::new(PTerminal { 
             writer: io::stdout(),
@@ -94,29 +90,33 @@ impl PTerminal {
             p_term.flush()?;
         }
 
-        let _pty_handler = std::thread::spawn(move || {
-
-            while let Ok(mut reader) = reader_2.lock() {
-                if p_term_2.lock().is_ok_and(|j|j.join_handler) {
-                    break;
-                }
-                if let Ok(mut p_term) = p_term_2.lock() {
-                    let seqs = Sequence::parse_writer(&mut reader);
-                    for seq in seqs {
-                        match seq {
-                            Sequence::Text(t) => {
-                                p_term.to_write.push(t as u8);
-                            },
-                            Sequence::Escape(escs) => {
-                                for esc in escs {
-                                    p_term.to_write.append(&mut esc.to_string().into_bytes());
+        let pty_handler = std::thread::spawn(move || {
+            let mut count = 0;
+            let mut s: [u8; 1] = [0;1];
+            loop {
+                if count%2==0 {
+                    if let Ok(mut p_term) = p_term_2.lock() {
+                        if p_term.join_handler {
+                            break;
+                        }
+                        let seqs = Sequence::parse_writer(&mut p_term.pty_reader);
+                        for seq in seqs {
+                            match seq {
+                                Sequence::Text(t) => {
+                                    p_term.to_write.push(t as u8);
+                                },
+                                Sequence::Escape(escs) => {
+                                    for esc in escs {
+                                        p_term.to_write.append(&mut esc.to_string().into_bytes());
+                                    }
                                 }
                             }
                         }
+                        p_term.flush();
+                        count+=1;
                     }
-                    p_term.flush();
                 }
-            };
+            }
             log_message("pty_handler exited");
             return;
         });
@@ -124,87 +124,84 @@ impl PTerminal {
         let _key_listener_handler = std::thread::spawn(move || {
             let mut stdin = io::stdin();
             let mut escaped = true;
-            while let Ok(mut key_buffer) = key_buffer_2.lock() {
-                if p_term_3.lock().is_ok_and(|j|j.join_handler) {
-                    break;
-                }
-                if escaped {
-                    if key_buffer[0] == 29 {
-                        escaped = true;
-                    }
-                    match key_buffer[0] as char {
-                        'r' => {
-                            if let Ok(mut p_term) = p_term_3.lock() {
-                                if let Ok(pwd) = p_term.get_process_pwd() {
-                                    p_term.respawn(&pwd);
-                                }                            
-                            }
+            let mut count = 0;
+            loop {            
+                if count%2==1 {
+                    if let Ok(mut p_term) = p_term_3.lock() {
+                        if p_term.join_handler {
+                            break;
                         }
-                        'q' => {
-                            if let Ok(mut p_term) = p_term_3.lock() {
-                                p_term.join_handler = true;
+                        if escaped {
+                            if p_term.key_buffer[0] == 29 {
+                                escaped = true;
                             }
-                            break;
-                        },
-                        '\n' => {},
-                        'i' => {
-                            log_message("test");
-                            escaped = false;
-                        },
-                        _ => {}
-                    }        
-                    let _ = stdin.read(&mut *key_buffer);
-                } else {
-                    while child_2.lock().is_ok_and(|mut c| c.try_wait().is_ok_and(|r| r.is_none())) {
-                        if key_buffer[0] == 29 {
-                            escaped = true;
-                            break;
+                            match p_term.key_buffer[0] as char {
+                                'r' => {
+                                    if let Ok(pwd) = p_term.get_process_pwd() {
+                                        p_term.respawn(&pwd);
+                                    }                            
+                                }
+                                'q' => {
+                                    p_term.close();
+                                    break;
+                                },
+                                '\n' => {},
+                                'i' => {
+                                    escaped = false;
+                                },
+                                _ => {}
+                            }        
+                            let _ = stdin.read(&mut p_term.key_buffer);
                         } else {
-                            if let Ok(mut writer) = writer_2.lock() {
-                                let _ = writer.write(&*key_buffer);
-                                //write!(writer, "{}", buffer[0]).expect("oOF");
-                            };
+                            if key_buffer[0] == 29 {
+                                escaped = true;
+                                break;
+                            } else {
+                                (p_term.pty_writer).write(&key_buffer); 
+                                p_term.pty_writer.flush();
+                                    //let _ = writer.write(&*key_buffer);
+                            }
+                            let _ = stdin.read(&mut p_term.key_buffer);
                         }
-                        let _ = stdin.read(&mut *key_buffer);
+                        count += 1;
                     }
                 }
+                    thread::sleep(Duration::from_millis(100));
             }
+            log_message("key log exited");
         });
+        
 
 
-        Ok(p_term)
+        Ok((pty_handler,p_term))
     }
 
 
     pub fn get_process_pwd(&self) -> io::Result<String> {
-        if let Ok(child) = self.child.lock() {
-            if let Some(process_id) = self.pty_pair.master.process_group_leader() {
-            //if let Some(process_id) = child.process_id() {
-                let mut target = vec![0u8; 4096];
+        if let Some(process_id) = self.pty_pair.master.process_group_leader() {
+        //if let Some(process_id) = child.process_id() {
+            let mut target = vec![0u8; 4096];
 
 
-                let path = format!("/proc/{}/cwd", process_id);
+            let path = format!("/proc/{}/cwd", process_id);
 
+            match PTerminal::read_link_to_buf(&path, &mut target) {
+                Ok(n) if n > 0 => return Ok(String::from_utf8_lossy(&target[..n]).to_string()),
+                Ok(_) => {},
+                Err(_) => {}
+            }
+
+            let mut sid: pid_t = 0;
+            if unsafe { ioctl(process_id as i32, TIOCGSID, &mut sid) } != -1 {
+                let path = format!("/proc/{}/cwd", sid);
                 match PTerminal::read_link_to_buf(&path, &mut target) {
                     Ok(n) if n > 0 => return Ok(String::from_utf8_lossy(&target[..n]).to_string()),
                     Ok(_) => {},
                     Err(_) => {}
                 }
-
-                let mut sid: pid_t = 0;
-                if unsafe { ioctl(process_id as i32, TIOCGSID, &mut sid) } != -1 {
-                    let path = format!("/proc/{}/cwd", sid);
-                    match PTerminal::read_link_to_buf(&path, &mut target) {
-                        Ok(n) if n > 0 => return Ok(String::from_utf8_lossy(&target[..n]).to_string()),
-                        Ok(_) => {},
-                        Err(_) => {}
-                    }
-                }
-
-                return Err(io::Error::new(io::ErrorKind::NotFound, "process id returned None"));
-            } else {
-                return Err(io::Error::new(io::ErrorKind::NotFound, "process id returned None"));
             }
+
+            return Err(io::Error::new(io::ErrorKind::NotFound, "process id returned None"));
         } else {
             return Err(io::Error::new(io::ErrorKind::NotFound, "process id returned None"));
         }
@@ -225,14 +222,12 @@ impl PTerminal {
         cmd.arg("-c");
         cmd.arg(format!("cd {}; bash", working_dir));
 
-        if let Ok(mut child) = self.child.lock() {
-            child.kill()?;
-            *child = match self.pty_pair.slave.spawn_command(cmd) {
-                Ok(child) => {child},
-                Err(_) => {
-                    return Err(Error::new(io::ErrorKind::Other, "failed to spawn process"))}
-            };
-        }
+        self.child.kill()?;
+        self.child = match self.pty_pair.slave.spawn_command(cmd) {
+            Ok(child) => {child},
+            Err(_) => {
+                return Err(Error::new(io::ErrorKind::Other, "failed to spawn process"))}
+        };
         Ok(())
     }
 
@@ -265,10 +260,10 @@ impl PTerminal {
     }
 
     pub fn close(&mut self) {
-        self.join_handler = true;
         raw_mode(self.raw_mode);
         self.queue(Sequence::Escape(vec![Escape::ExitAltScreen]));
         self.flush();
+        self.join_handler = true;
     }
 
 }

@@ -18,6 +18,7 @@
 
 - [x] Fix blocking I/O on thread join issue
 - [x] Figure out how to get child process pwd
+- [ ] Figure out where deadlock in forker is
 
 
 ### Dev Log
