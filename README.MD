@@ -9,8 +9,10 @@
 - [ ] Implement Full Terminal Emulation
 - [ ] Add Visual/Normal Modes and Commands
 - [ ] TUI Library
-- [ ] Text editor and plugin system
+- [ ] Plugin System
 - [ ] Python configuration api?
+- [ ] Incorperate JEF as plugin
+- [ ] Text editor as plugin
 
 ### Problems to Solve
 
