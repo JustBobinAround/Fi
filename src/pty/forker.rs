@@ -60,6 +60,7 @@ impl PTerminal {
         let writer = pair.master.take_writer().expect("OOF");
         let to_write = Vec::new();
         let buffer_hist = Vec::new();
+        let join_handler = Arc::new(Mutex::new(false));
 
         let p_term = Arc::new(Mutex::new(PTerminal { 
             writer: io::stdout(),
@@ -135,10 +136,10 @@ impl PTerminal {
             let mut key_buffer = [0;1];
             let mut stdin = io::stdin();
             let mut escaped = true;
-            'running: loop {
+            loop {
             if let Ok(mut p_term) = p_term_3.try_lock() {
                 if p_term.join_handler {
-                    break 'running;
+                    break;
                 }
                 log_message("b1");
                 if escaped {
@@ -155,7 +156,8 @@ impl PTerminal {
                         }
                         'q' => {
                             p_term.close();
-                            break 'running;
+                            log_message("closing all");
+                            break;
                         },
                         '\n' => {},
                         'i' => {
@@ -277,6 +279,7 @@ impl PTerminal {
     }
 
     pub fn close(&mut self) {
+        self.child.kill();
         raw_mode(self.raw_mode);
         self.queue(Sequence::Escape(vec![Escape::ExitAltScreen]));
         self.flush();

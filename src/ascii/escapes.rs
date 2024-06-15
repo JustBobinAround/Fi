@@ -54,7 +54,7 @@ impl ParsableSequence<Sequence> for Sequence{
         let mut s: [u8; 1] = [0;1];
 
         match reader.read_exact(&mut s) {
-            Ok(n) => {
+            Ok(_) => {
                 let c = s[0] as char;
                 if c as char == ESC_CHAR {
                     let escapes = Escape::parse_writer(reader);
@@ -355,7 +355,7 @@ impl ParsableSequence<Escape> for Escape{
         let mut escapes = Vec::new();
         let mut s: [u8; 1] = [0;1];
         match reader.read_exact(&mut s) {
-            Ok(n) => {
+            Ok(_) => {
                 let c = s[0] as char;
                 match c {
                     '[' => {escapes = parse_long_write(escapes, reader);},
@@ -387,6 +387,7 @@ fn parse_long_write(mut escapes: Vec<Escape>, reader: &mut Box<dyn Read + Send>)
         match reader.read_exact(&mut s) {
             Ok(_) => {
                 let c = s[0] as char;
+                log_message(&format!("{}",c));
                 if i<1 {
                     if c=='=' {
                         special_esc_flag = SpecialLongCase::ScreenMode;
