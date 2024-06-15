@@ -16,7 +16,6 @@ pub struct PTerminal{
     buffer_hist: Vec<Sequence>,
     raw_mode: Option<Termios>,
     pub join_handler: bool,
-    key_buffer: [u8; 1],
     size_x: u16,
     size_y: u16,
     offset_x: u32,
@@ -24,7 +23,7 @@ pub struct PTerminal{
     child: Box<dyn portable_pty::Child + Send + Sync>,
     pty_pair: PtyPair,
     pty_writer: Box<dyn Write + Send>,
-    pty_reader: Box<dyn Read + Send>,
+    pty_reader: Arc<Mutex<Box<dyn Read + Send>>>,
 }
 
 impl PTerminal {
@@ -57,18 +56,16 @@ impl PTerminal {
         };
 
 
-        let reader = pair.master.try_clone_reader().expect("OOF");
+        let reader = Arc::new(Mutex::new(pair.master.try_clone_reader().expect("OOF")));
         let writer = pair.master.take_writer().expect("OOF");
         let to_write = Vec::new();
         let buffer_hist = Vec::new();
-        let key_buffer = [0;1];
 
         let p_term = Arc::new(Mutex::new(PTerminal { 
             writer: io::stdout(),
             to_write,
             buffer_hist,
             raw_mode,
-            key_buffer,
             join_handler: false,
             size_x,
             size_y,
@@ -93,13 +90,24 @@ impl PTerminal {
         let pty_handler = std::thread::spawn(move || {
             let mut count = 0;
             let mut s: [u8; 1] = [0;1];
-            loop {
-                if count%2==0 {
+            loop{
+            if let Ok(mut p_term) = p_term_2.lock() {
+                log_message("a1");
+                if p_term.join_handler {
+                    break;
+                }
+                log_message("a2");
+                let test = p_term.pty_reader.clone();
+                drop(p_term);
+                log_message("a3");
+                if let Ok(mut test) = test.lock() {
+                    log_message("special2");
+                    let seqs = Sequence::parse_writer(&mut test);
+                    log_message("special");
                     if let Ok(mut p_term) = p_term_2.lock() {
                         if p_term.join_handler {
                             break;
                         }
-                        let seqs = Sequence::parse_writer(&mut p_term.pty_reader);
                         for seq in seqs {
                             match seq {
                                 Sequence::Text(t) => {
@@ -112,66 +120,75 @@ impl PTerminal {
                                 }
                             }
                         }
+                        log_message("a4");
                         p_term.flush();
-                        count+=1;
                     }
-                }
+                };
+                log_message("a5");
+            }
             }
             log_message("pty_handler exited");
             return;
         });
 
         let _key_listener_handler = std::thread::spawn(move || {
+            let mut key_buffer = [0;1];
             let mut stdin = io::stdin();
             let mut escaped = true;
-            let mut count = 0;
-            loop {            
-                if count%2==1 {
-                    if let Ok(mut p_term) = p_term_3.lock() {
-                        if p_term.join_handler {
-                            break;
-                        }
-                        if escaped {
-                            if p_term.key_buffer[0] == 29 {
-                                escaped = true;
-                            }
-                            match p_term.key_buffer[0] as char {
-                                'r' => {
-                                    if let Ok(pwd) = p_term.get_process_pwd() {
-                                        p_term.respawn(&pwd);
-                                    }                            
-                                }
-                                'q' => {
-                                    p_term.close();
-                                    break;
-                                },
-                                '\n' => {},
-                                'i' => {
-                                    escaped = false;
-                                },
-                                _ => {}
-                            }        
-                            let _ = stdin.read(&mut p_term.key_buffer);
-                        } else {
-                            if key_buffer[0] == 29 {
-                                escaped = true;
-                                break;
-                            } else {
-                                (p_term.pty_writer).write(&key_buffer); 
-                                p_term.pty_writer.flush();
-                                    //let _ = writer.write(&*key_buffer);
-                            }
-                            let _ = stdin.read(&mut p_term.key_buffer);
-                        }
-                        count += 1;
-                    }
+            'running: loop {
+            if let Ok(mut p_term) = p_term_3.try_lock() {
+                if p_term.join_handler {
+                    break 'running;
                 }
-                    thread::sleep(Duration::from_millis(100));
-            }
+                log_message("b1");
+                if escaped {
+                log_message("ba2");
+                    if key_buffer[0] == 29 {
+                        escaped = true;
+                    }
+                log_message("ba3");
+                    match key_buffer[0] as char {
+                        'r' => {
+                            if let Ok(pwd) = p_term.get_process_pwd() {
+                                p_term.respawn(&pwd);
+                            }                            
+                        }
+                        'q' => {
+                            p_term.close();
+                            break 'running;
+                        },
+                        '\n' => {},
+                        'i' => {
+                            escaped = false;
+                        },
+                        _ => {}
+                    }        
+                log_message("ba4");
+                    drop(p_term);
+                    let _ = stdin.read_exact(&mut key_buffer);
+                log_message("ba5");
+                } else {
+                log_message("bb1");
+                    if key_buffer[0] == 29 {
+                        escaped = true;
+                log_message("bb2");
+                    } else {
+                log_message("bb3");
+                        (p_term.pty_writer).write(&key_buffer); 
+                log_message("bb4");
+                        p_term.pty_writer.flush();
+                log_message("bb5");
+                            //let _ = writer.write(&*key_buffer);
+                    }
+                    drop(p_term);
+                log_message("bb6");
+                    //let _ = stdin.read(&mut key_buffer);
+                    let _ = stdin.read_exact(&mut key_buffer);
+                log_message("bb7");
+                }
+            }}
             log_message("key log exited");
         });
-        
-
 
         Ok((pty_handler,p_term))
     }
@@ -241,7 +258,7 @@ impl PTerminal {
                     for b in esc.to_string().as_bytes().iter() {
                         self.to_write.push(*b);
                     }
-                    esc.send(&mut self.writer.lock())?;
+                    //esc.send(&mut self.writer.lock())?;
                 }
             }
         }
