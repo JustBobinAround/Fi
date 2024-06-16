@@ -7,6 +7,14 @@ lazy_static! {
     static ref LOGGER: Arc<Mutex<Logger>> = Arc::new(Mutex::new(Logger::new("log.txt")));
 }
 
+
+#[macro_export] 
+macro_rules! error_log {
+    ($err: literal) => {
+        { std::io::Error::new(std::io::ErrorKind::Other, $err) }
+    };
+}
+
 struct Logger {
     filename: String,
 }

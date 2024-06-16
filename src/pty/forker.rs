@@ -1,14 +1,14 @@
 use libc::termios as Termios;
 use std::ffi::CString;
-use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::thread::JoinHandle;
 use libc::{pid_t, TIOCGSID, ioctl, readlink};
 use portable_pty::{native_pty_system, CommandBuilder, PtyPair, PtySize};
 use std::sync::{Arc, Mutex};
-use std::io::{self, Error, Read, Stdout, Write};
+use std::io::{self, Read, Stdout, Write};
 use super::raw_mode::raw_mode;
 use crate::ascii::escapes::{Escape, Sequence, ParsableSequence};
-use crate::logger::log_message;
+//use crate::logger::log_message;
+use crate::error_log;
 
 pub struct PTerminal{
     writer: Stdout,
@@ -46,13 +46,13 @@ impl PTerminal {
 
         let pair = match pair {
             Ok(pair) => {pair},
-            Err(_) => {return Err(Error::new(io::ErrorKind::Other, "failed to make pty pair"))}
+            Err(_) => {return Err(error_log!("failed to make pty pair"))}
         };
 
 
         let child = match pair.slave.spawn_command(cmd) {
             Ok(child) => {child},
-            Err(_) => {return Err(Error::new(io::ErrorKind::Other, "failed to spawn process"))}
+            Err(_) => {return Err(error_log!("failed to spawn process"))}
         };
 
 
@@ -60,7 +60,6 @@ impl PTerminal {
         let writer = pair.master.take_writer().expect("OOF");
         let to_write = Vec::new();
         let buffer_hist = Vec::new();
-        let join_handler = Arc::new(Mutex::new(false));
 
         let p_term = Arc::new(Mutex::new(PTerminal { 
             writer: io::stdout(),
@@ -89,22 +88,15 @@ impl PTerminal {
         }
 
         let pty_handler = std::thread::spawn(move || {
-            let mut count = 0;
-            let mut s: [u8; 1] = [0;1];
             loop{
-            if let Ok(mut p_term) = p_term_2.lock() {
-                log_message("a1");
+            if let Ok(p_term) = p_term_2.lock() {
                 if p_term.join_handler {
                     break;
                 }
-                log_message("a2");
                 let test = p_term.pty_reader.clone();
                 drop(p_term);
-                log_message("a3");
                 if let Ok(mut test) = test.lock() {
-                    log_message("special2");
                     let seqs = Sequence::parse_writer(&mut test);
-                    log_message("special");
                     if let Ok(mut p_term) = p_term_2.lock() {
                         if p_term.join_handler {
                             break;
@@ -121,14 +113,11 @@ impl PTerminal {
                                 }
                             }
                         }
-                        log_message("a4");
-                        p_term.flush();
+                        let _ = p_term.flush();
                     }
                 };
-                log_message("a5");
             }
             }
-            log_message("pty_handler exited");
             return;
         });
 
@@ -141,22 +130,18 @@ impl PTerminal {
                 if p_term.join_handler {
                     break;
                 }
-                log_message("b1");
                 if escaped {
-                log_message("ba2");
                     if key_buffer[0] == 29 {
                         escaped = true;
                     }
-                log_message("ba3");
                     match key_buffer[0] as char {
                         'r' => {
                             if let Ok(pwd) = p_term.get_process_pwd() {
-                                p_term.respawn(&pwd);
+                                let _ = p_term.respawn(&pwd);
                             }                            
                         }
                         'q' => {
-                            p_term.close();
-                            log_message("closing all");
+                            let _ = p_term.close();
                             break;
                         },
                         '\n' => {},
@@ -165,31 +150,19 @@ impl PTerminal {
                         },
                         _ => {}
                     }        
-                log_message("ba4");
                     drop(p_term);
                     let _ = stdin.read_exact(&mut key_buffer);
-                log_message("ba5");
                 } else {
-                log_message("bb1");
                     if key_buffer[0] == 29 {
                         escaped = true;
-                log_message("bb2");
                     } else {
-                log_message("bb3");
-                        (p_term.pty_writer).write(&key_buffer); 
-                log_message("bb4");
-                        p_term.pty_writer.flush();
-                log_message("bb5");
-                            //let _ = writer.write(&*key_buffer);
+                        let _ = (p_term.pty_writer).write(&key_buffer); 
+                        let _ = p_term.pty_writer.flush();
                     }
                     drop(p_term);
-                log_message("bb6");
-                    //let _ = stdin.read(&mut key_buffer);
                     let _ = stdin.read_exact(&mut key_buffer);
-                log_message("bb7");
                 }
             }}
-            log_message("key log exited");
         });
 
         Ok((pty_handler,p_term))
@@ -198,7 +171,6 @@ impl PTerminal {
 
     pub fn get_process_pwd(&self) -> io::Result<String> {
         if let Some(process_id) = self.pty_pair.master.process_group_leader() {
-        //if let Some(process_id) = child.process_id() {
             let mut target = vec![0u8; 4096];
 
 
@@ -220,9 +192,9 @@ impl PTerminal {
                 }
             }
 
-            return Err(io::Error::new(io::ErrorKind::NotFound, "process id returned None"));
+            return Err(error_log!("process id returned None"));
         } else {
-            return Err(io::Error::new(io::ErrorKind::NotFound, "process id returned None"));
+            return Err(error_log!("process id returned None"));
         }
     }
 
@@ -244,8 +216,7 @@ impl PTerminal {
         self.child.kill()?;
         self.child = match self.pty_pair.slave.spawn_command(cmd) {
             Ok(child) => {child},
-            Err(_) => {
-                return Err(Error::new(io::ErrorKind::Other, "failed to spawn process"))}
+            Err(_) => {return Err(error_log!("failed to spawn process"))}
         };
         Ok(())
     }
@@ -260,7 +231,6 @@ impl PTerminal {
                     for b in esc.to_string().as_bytes().iter() {
                         self.to_write.push(*b);
                     }
-                    //esc.send(&mut self.writer.lock())?;
                 }
             }
         }
@@ -278,12 +248,13 @@ impl PTerminal {
         Ok(())
     }
 
-    pub fn close(&mut self) {
-        self.child.kill();
-        raw_mode(self.raw_mode);
-        self.queue(Sequence::Escape(vec![Escape::ExitAltScreen]));
-        self.flush();
+    pub fn close(&mut self) -> io::Result<()>{
+        self.child.kill()?;
+        raw_mode(self.raw_mode)?;
+        self.queue(Sequence::Escape(vec![Escape::ExitAltScreen]))?;
+        self.flush()?;
         self.join_handler = true;
+        Ok(())
     }
 
 }
