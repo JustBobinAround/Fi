@@ -108,7 +108,7 @@ impl PTerminal {
                                 },
                                 Sequence::Escape(escs) => {
                                     for esc in escs {
-                                        p_term.to_write.append(&mut esc.to_string().into_bytes());
+                                        p_term.to_write.append(&mut esc.into_bytes());
                                     }
                                 }
                             }
@@ -228,7 +228,7 @@ impl PTerminal {
             },
             Sequence::Escape(escs) => {
                 for esc in escs {
-                    for b in esc.to_string().as_bytes().iter() {
+                    for b in esc.into_bytes().iter() {
                         self.to_write.push(*b);
                     }
                 }
