@@ -78,10 +78,10 @@ functions, Ascii parsing will need to be implemented. I will be testing the
 functionality by separating the parser into its own process for now so that I
 can pipe text with escape via bash using echo.
 
-### Phase 3 - multiplexer
+### Phase 3.5 - multiplexer?
 
 Once the parser has been made, implementing a multiplexer should be fairly easy.
-I don't think much needs to be said here.
+I'm still deciding on if I will do this...
 
 ### Phase 4 - higher level terminal api
 
